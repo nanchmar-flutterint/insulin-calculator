@@ -140,7 +140,7 @@ The request data flow through the application is as follows:
 The project uses AWS CDK to define and deploy the following resources:
 
 - Lambda:
-  - SqsHandlerFunction: Processes API requests, calculates insulin dosage, and stores nutrition history
+  - SqsHandlerFunction: Processes API requests, calculates insulin dosage,insulin dosage timing, and stores nutrition history
   - AuthorizerFunction: Handles API authentication
   - AWSSDKPandas Layer: Provides additional libraries for the Lambda functions
 
