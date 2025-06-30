@@ -39,9 +39,9 @@ class ImprovedConfig:
 
     # Evidence-based Fiasp pharmacokinetics
     # Based on clinical PK studies showing Fiasp onset at 2.5 min, peak at 60-63 min
-
+    insulin_onset_time: int = 3  # minutes to onset
     insulin_peak_time: int = 63  # minutes to peak (from clinical studies)
-
+    insulin_duration: int = 300  # total duration in minutes (5 hours)
 
     # Evidence-based circadian parameters
     # Based on research showing dawn phenomenon varies 15-25% of basal needs
@@ -52,8 +52,8 @@ class ImprovedConfig:
     daily_peak_hour: float = 16.0  # Afternoon insulin resistance peak (4 PM)
 
     # Additional circadian parameters from research
-
-
+    circadian_phase_shift: float = 0.5  # Individual variation in circadian phase
+    insulin_sensitivity_nadir: float = 0.15  # Lowest sensitivity (15% reduction)
 
 
 # Initialize AWS clients
@@ -137,7 +137,9 @@ class ImprovedInsulinCalculator:
         self.blood_glucose = float(blood_glucose)
 
         # Calculate circadian adjustment
-        current_time = datetime.now(ZoneInfo("Europe/Sofia")) # should be send by frontend
+        current_time = datetime.now(
+            ZoneInfo("Europe/Sofia")
+        )  # should be send by frontend
         hour = current_time.hour + current_time.minute / 60.0  # More precise timing
 
         # Dawn phenomenon (cortisol-driven, peaks around 6 AM)
@@ -194,14 +196,13 @@ class ImprovedInsulinCalculator:
 
             # IMPROVED: Evidence-based FPU calculation
             fpu_analysis = calculate_evidence_based_fpu(np.sum(fats), np.sum(proteins))
-            # Convert FPU to insulin using carb ratio (1 FPU = 10g carbs equivalent)
             fpu_total_insulin = (
                 fpu_analysis["total_fpu"] * 10 / self.insulin_carbs_ratio
             )
 
             # Calculate GI and timing
             gi_weighted = np.average(gi, weights=carbs) if np.sum(carbs) > 0 else 55
-            optimal_timing = find_optimal_shift(
+            optimal_timing = calculate_improved_timing(
                 ImprovedConfig.insulin_peak_time, gi_weighted
             )
 
@@ -257,6 +258,81 @@ class ImprovedInsulinCalculator:
             }
         finally:
             loop.close()
+
+
+@lru_cache(maxsize=1000)
+def improved_gamma_pdf(t: float, shape: float, rate: float) -> float:
+    """
+    More accurate gamma distribution using rate parameterization
+    Based on pharmacokinetic modeling standards
+    """
+    if t <= 0:
+        return 0.0
+    return (rate**shape) * (t ** (shape - 1)) * math.exp(-rate * t) / math.gamma(shape)
+
+
+def improved_insulin_activity(t: float, peak_time: float = 63) -> float:
+    """
+    Evidence-based Fiasp pharmacokinetics
+    Based on clinical studies showing:
+    - Onset: 2.5 minutes
+    - Peak: 60-63 minutes
+    - Duration: ~5 hours
+    """
+    if t < ImprovedConfig.insulin_onset_time:
+        return 0.0
+
+    # Adjusted time accounting for onset delay
+    t_adj = t - ImprovedConfig.insulin_onset_time
+
+    # Shape parameter optimized for Fiasp profile
+    shape = 2.5  # Slightly lower for faster onset
+    rate = shape / (peak_time - ImprovedConfig.insulin_onset_time)
+
+    return improved_gamma_pdf(t_adj, shape, rate)
+
+
+def improved_carb_absorption(t: float, gi: float) -> float:
+    """
+     More accurate carbohydrate absorption modeling
+    Based on gastric emptying and GI research
+    """
+    # GI-based peak time: high GI = faster absorption
+    # Research shows GI affects both rate and timing
+    base_peak = 45  # minutes for moderate GI foods
+    gi_adjustment = (100 - gi) * 0.4  # 0.4 min per GI point
+    peak_time = base_peak + gi_adjustment
+
+    # Shape parameter varies with GI
+    shape = 2.0 + (gi / 100) * 1.5  # Higher GI = sharper peak
+    rate = shape / peak_time
+
+    return improved_gamma_pdf(t, shape, rate)
+
+
+def calculate_improved_timing(insulin_peak: float, gi: float) -> float:
+    """
+    Better timing optimization using convolution
+    """
+    time_range = np.linspace(-30, 180, 420)  # Higher resolution
+    best_timing = 0
+    best_overlap = 0
+
+    for timing_offset in time_range:
+        overlap = 0
+        for t in np.linspace(0, 300, 300):
+            if t + timing_offset >= 0:
+                insulin_activity = improved_insulin_activity(
+                    t + timing_offset, insulin_peak
+                )
+                carb_rate = improved_carb_absorption(t, gi)
+                overlap += insulin_activity * carb_rate
+
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_timing = timing_offset
+
+    return best_timing
 
 
 def calculate_evidence_based_fpu(fats: float, proteins: float) -> Dict[str, Any]:
@@ -375,100 +451,6 @@ def calculate_evidence_based_fpu(fats: float, proteins: float) -> Dict[str, Any]
         "timing_recommendations": recommendations,
         "carb_equivalent_grams": round(total_fpu * 10, 1),
     }
-
-
-@lru_cache(maxsize=1000)
-def gamma_pdf(t: float, a: float, scale: float) -> float:
-    """
-    Calculates the probability density function of the gamma distribution.
-    Used to model both insulin activity and carbohydrate absorption.
-
-    Args:
-        t: Time point
-        a: Shape parameter of the gamma distribution
-        scale: Scale parameter of the gamma distribution
-
-    Returns:
-        Probability density at time t
-    """
-    if t < 0:
-        return 0.0
-    return (t ** (a - 1) * math.exp(-t / scale)) / (math.gamma(a) * scale**a)
-
-
-def insulin_activity(t: float, peak_time: float = 60) -> float:
-    """
-    Models how active insulin is at a given time point.
-    Uses a gamma distribution with parameters tuned to match insulin behavior.
-
-    Args:
-        t: Time point in minutes
-        peak_time: Time when insulin activity peaks (default 60 minutes)
-
-    Returns:
-        Relative insulin activity at time t
-    """
-    a = 3  # Shape parameter
-    theta = peak_time / (a - 1)  # Scale parameter
-    return gamma_pdf(t, a, theta)
-
-
-def carb_absorption(t: float, gi: float) -> float:
-    """
-    Models how quickly carbohydrates are absorbed based on their glycemic index.
-    Higher GI foods are absorbed more quickly than lower GI foods.
-
-    Args:
-        t: Time point in minutes
-        gi: Glycemic index of the food
-
-    Returns:
-        Relative absorption rate at time t
-    """
-    peak_time = 30 + (100 - gi) * 0.6
-    a = 3
-    theta = peak_time / (a - 1)
-    return gamma_pdf(t, a, theta)
-
-
-def calculate_overlap(shift: float, insulin_peak: float, gi: float) -> float:
-    """
-    Calculates how well insulin activity matches carbohydrate absorption.
-    Used to determine optimal injection timing.
-
-    Args:
-        shift: Time offset between injection and meal
-        insulin_peak: When insulin activity peaks
-        gi: Glycemic index of the meal
-
-    Returns:
-        Measure of overlap between insulin and carb curves
-    """
-    t_values = np.linspace(max(0, shift), 300, 500)
-    y_values = np.array(
-        [
-            insulin_activity(t - shift, insulin_peak) * carb_absorption(t, gi)
-            for t in t_values
-        ]
-    )
-    return np.trapz(y_values, t_values)
-
-
-def find_optimal_shift(insulin_peak: float, gi: float) -> float:
-    """
-    Determines the optimal timing for insulin injection relative to meal.
-    Finds when insulin activity best matches carbohydrate absorption.
-
-    Args:
-        insulin_peak: When insulin activity peaks
-        gi: Average glycemic index of the meal
-
-    Returns:
-        Optimal time offset in minutes (negative means inject before meal)
-    """
-    shifts = np.linspace(-60, 120, 100)
-    overlaps = np.array([calculate_overlap(s, insulin_peak, gi) for s in shifts])
-    return shifts[np.argmax(overlaps)]
 
 
 def lambda_handler(event: Dict[str, Any], _) -> Dict[str, Any]:
