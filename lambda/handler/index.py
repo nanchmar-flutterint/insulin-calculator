@@ -39,9 +39,9 @@ class ImprovedConfig:
 
     # Evidence-based Fiasp pharmacokinetics
     # Based on clinical PK studies showing Fiasp onset at 2.5 min, peak at 60-63 min
-    insulin_onset_time: int = 3  # minutes to onset
+
     insulin_peak_time: int = 63  # minutes to peak (from clinical studies)
-    insulin_duration: int = 300  # total duration in minutes (5 hours)
+
 
     # Evidence-based circadian parameters
     # Based on research showing dawn phenomenon varies 15-25% of basal needs
@@ -52,8 +52,8 @@ class ImprovedConfig:
     daily_peak_hour: float = 16.0  # Afternoon insulin resistance peak (4 PM)
 
     # Additional circadian parameters from research
-    circadian_phase_shift: float = 0.5  # Individual variation in circadian phase
-    insulin_sensitivity_nadir: float = 0.15  # Lowest sensitivity (15% reduction)
+
+
 
 
 # Initialize AWS clients
@@ -137,7 +137,7 @@ class ImprovedInsulinCalculator:
         self.blood_glucose = float(blood_glucose)
 
         # Calculate circadian adjustment
-        current_time = datetime.now(ZoneInfo("Europe/Sofia"))
+        current_time = datetime.now(ZoneInfo("Europe/Sofia")) # should be send by frontend
         hour = current_time.hour + current_time.minute / 60.0  # More precise timing
 
         # Dawn phenomenon (cortisol-driven, peaks around 6 AM)
