@@ -3,7 +3,7 @@
 # or implementing the sample code, visit the AWS docs:
 # https://aws.amazon.com/developer/language/python/
 from datetime import datetime
-
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 import boto3
 from botocore.exceptions import ClientError
@@ -48,6 +48,7 @@ def lambda_handler(event, context):
                 "TrendDirection": str(trend_direction),
                 "TrendDescription": str(trend_description),
                 "TrendArrow": str(trend_arrow),
+                "TTL": int((datetime.now(UTC) + timedelta(days=60)).timestamp()),
             }
         )
     except ClientError as e:
