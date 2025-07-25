@@ -25,7 +25,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 @dataclass(frozen=True)
-class ImprovedConfig:
+class Config:
     """
     Configuration settings for the insulin calculator.
     Contains default values and environment variables used throughout the application.
@@ -42,7 +42,6 @@ class ImprovedConfig:
 
     insulin_peak_time: int = 63  # minutes to peak (from clinical studies)
 
-
     # Evidence-based circadian parameters
     # Based on research showing dawn phenomenon varies 15-25% of basal needs
     # and daily insulin sensitivity varies 8-12%
@@ -54,13 +53,11 @@ class ImprovedConfig:
     # Additional circadian parameters from research
 
 
-
-
 # Initialize AWS clients
-dynamodb = boto3.resource("dynamodb", region_name=ImprovedConfig.region_name).Table(
-    ImprovedConfig.table_name
+dynamodb = boto3.resource("dynamodb", region_name=Config.region_name).Table(
+    Config.table_name
 )
-bedrock_client = boto3.client("bedrock-runtime", region_name=ImprovedConfig.region_name)
+bedrock_client = boto3.client("bedrock-runtime", region_name=Config.region_name)
 
 
 class NutrientPrompt:
@@ -101,7 +98,7 @@ async def get_nutrient_data(prompt: str) -> Optional[Dict[str, Any]]:
         response = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: bedrock_client.converse(
-                modelId=ImprovedConfig.model_id,
+                modelId=Config.model_id,
                 messages=[{"role": "user", "content": [{"text": prompt}]}],
                 inferenceConfig={"maxTokens": 2000, "temperature": 0, "topP": 1.0},
             ),
@@ -112,7 +109,7 @@ async def get_nutrient_data(prompt: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-class ImprovedInsulinCalculator:
+class InsulinCalculator:
     """
     Main class for calculating insulin dosages based on food intake and blood glucose levels.
     Takes into account circadian rhythms and different nutrient types.
@@ -126,10 +123,10 @@ class ImprovedInsulinCalculator:
         blood_glucose: str,
         insulin_carbs_ratio: str,
         compensation_factor: str,
-        dawn_amplitude: float = ImprovedConfig.dawn_amplitude,
-        daily_amplitude: float = ImprovedConfig.daily_amplitude,
-        dawn_peak_hour: float = ImprovedConfig.dawn_peak_hour,
-        daily_peak_hour: float = ImprovedConfig.daily_peak_hour,
+        dawn_amplitude: float = Config.dawn_amplitude,
+        daily_amplitude: float = Config.daily_amplitude,
+        dawn_peak_hour: float = Config.dawn_peak_hour,
+        daily_peak_hour: float = Config.daily_peak_hour,
     ):
         self.prompts = [NutrientPrompt.format(f, q) for f, q in zip(foods, quantities)]
         self.foods = foods
@@ -137,7 +134,9 @@ class ImprovedInsulinCalculator:
         self.blood_glucose = float(blood_glucose)
 
         # Calculate circadian adjustment
-        current_time = datetime.now(ZoneInfo("Europe/Sofia")) # should be send by frontend
+        current_time = datetime.now(
+            ZoneInfo("Europe/Sofia")
+        )  # should be send by frontend
         hour = current_time.hour + current_time.minute / 60.0  # More precise timing
 
         # Dawn phenomenon (cortisol-driven, peaks around 6 AM)
@@ -150,7 +149,7 @@ class ImprovedInsulinCalculator:
 
         # Combined circadian factor (1.0 = normal, >1.0 = more resistant, <1.0 = more sensitive)
         self.circadian_factor = 1.0 + dawn_effect + daily_effect
-
+        self.circadian_factor = max(0.85, min(1.15, self.circadian_factor))  # cap it
         # Apply circadian adjustment to patient parameters
         self.insulin_carbs_ratio = float(insulin_carbs_ratio) * self.circadian_factor
         self.compensation_factor = float(compensation_factor) * self.circadian_factor
@@ -201,8 +200,8 @@ class ImprovedInsulinCalculator:
 
             # Calculate GI and timing
             gi_weighted = np.average(gi, weights=carbs) if np.sum(carbs) > 0 else 55
-            optimal_timing = find_optimal_shift(
-                ImprovedConfig.insulin_peak_time, gi_weighted
+            optimal_timing = find_optimal_shift_with_bg(
+                Config.insulin_peak_time, gi_weighted, self.blood_glucose
             )
 
             # Prepare detailed recommendations
@@ -432,26 +431,26 @@ def carb_absorption(t: float, gi: float) -> float:
 
 
 def calculate_overlap(shift: float, insulin_peak: float, gi: float) -> float:
-    """
-    Calculates how well insulin activity matches carbohydrate absorption.
-    Used to determine optimal injection timing.
+    # Always evaluate from time 0 to 300
+    t_values = np.linspace(0, 300, 500)
 
-    Args:
-        shift: Time offset between injection and meal
-        insulin_peak: When insulin activity peaks
-        gi: Glycemic index of the meal
+    # Calculate overlap at each time point
+    overlaps = []
+    for t in t_values:
+        # Insulin activity (accounting for shift)
+        if shift >= 0:
+            # Post-meal dosing: insulin starts at time = shift
+            ins = insulin_activity(t - shift, insulin_peak) if t >= shift else 0
+        else:
+            # Pre-meal dosing: insulin starts before meal
+            ins = insulin_activity(t - shift, insulin_peak)
 
-    Returns:
-        Measure of overlap between insulin and carb curves
-    """
-    t_values = np.linspace(max(0, shift), 300, 500)
-    y_values = np.array(
-        [
-            insulin_activity(t - shift, insulin_peak) * carb_absorption(t, gi)
-            for t in t_values
-        ]
-    )
-    return np.trapz(y_values, t_values)
+        # Carb absorption (always starts at t=0)
+        carb = carb_absorption(t, gi)
+
+        overlaps.append(ins * carb)
+
+    return np.trapz(overlaps, t_values)
 
 
 def find_optimal_shift(insulin_peak: float, gi: float) -> float:
@@ -466,9 +465,29 @@ def find_optimal_shift(insulin_peak: float, gi: float) -> float:
     Returns:
         Optimal time offset in minutes (negative means inject before meal)
     """
-    shifts = np.linspace(-60, 120, 100)
+    shifts = np.linspace(-20, 30, 100)
     overlaps = np.array([calculate_overlap(s, insulin_peak, gi) for s in shifts])
     return shifts[np.argmax(overlaps)]
+
+
+def find_optimal_shift_with_bg(
+    insulin_peak: float, gi: float, blood_glucose: float
+) -> float:
+    base_shift = find_optimal_shift(insulin_peak, gi)
+
+    # Linear adjustment based on BG deviation
+    target_bg = 5.6  # mmol/L
+    adjustment = -(blood_glucose - target_bg) * 3  # 3 min per mmol/L deviation
+
+    adjusted_shift = base_shift + adjustment
+
+    # Safety overrides
+    if blood_glucose < 3.9:
+        adjusted_shift = max(adjusted_shift, 20)
+    elif blood_glucose > 13.9:
+        adjusted_shift = min(adjusted_shift, 0)
+
+    return np.clip(adjusted_shift, -20, 30)
 
 
 def lambda_handler(event: Dict[str, Any], _) -> Dict[str, Any]:
@@ -485,20 +504,16 @@ def lambda_handler(event: Dict[str, Any], _) -> Dict[str, Any]:
     """
     try:
         payload = json.loads(event["body"])
-        insulin_calc = ImprovedInsulinCalculator(
+        insulin_calc = InsulinCalculator(
             list(payload["Foods"].keys()),
             list(payload["Foods"].values()),
             payload["BloodGlucose"],
             payload["ICR"],
             payload["CF"],
-            dawn_amplitude=payload.get("DawnAmplitude", ImprovedConfig.dawn_amplitude),
-            daily_amplitude=payload.get(
-                "DailyAmplitude", ImprovedConfig.daily_amplitude
-            ),
-            dawn_peak_hour=payload.get("DawnPeakHour", ImprovedConfig.dawn_peak_hour),
-            daily_peak_hour=payload.get(
-                "DailyPeakHour", ImprovedConfig.daily_peak_hour
-            ),
+            dawn_amplitude=payload.get("DawnAmplitude", Config.dawn_amplitude),
+            daily_amplitude=payload.get("DailyAmplitude", Config.daily_amplitude),
+            dawn_peak_hour=payload.get("DawnPeakHour", Config.dawn_peak_hour),
+            daily_peak_hour=payload.get("DailyPeakHour", Config.daily_peak_hour),
         )
 
         table_entry = insulin_calc.calculate_insulin_dosage()

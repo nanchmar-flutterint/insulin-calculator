@@ -1,3 +1,5 @@
+import subprocess
+
 from aws_cdk import (
     Stack,
     aws_dynamodb as dynamodb,
@@ -8,8 +10,12 @@ from aws_cdk import (
     aws_logs as logs,
     CfnOutput as CfnOutput,
     Duration,
+    BundlingOptions,
+    aws_events,
+    aws_events_targets,
 )
 from aws_cdk.aws_iam import PolicyDocument
+from aws_cdk.aws_scheduler import Schedule, ScheduleExpression
 from constructs import Construct
 import json
 import os
@@ -17,6 +23,24 @@ import os
 
 class InsulinCalcStack(Stack):
     MODEL = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+
+    def create_dependencies_layer_cgm(
+        self, project_name, function_name: str
+    ) -> lambda_.LayerVersion:
+        requirements_file = "lambda/cgm/" + function_name + ".txt"
+        output_dir = ".lambda/cgm/" + function_name
+
+        # Install requirements for layer in the output_dir
+        if not os.environ.get("SKIP_PIP"):
+            # Note: Pip will create the output dir if it does not exist
+            subprocess.check_call(
+                f"pip install -r {requirements_file} -t {output_dir}/python".split()
+            )
+        return lambda_.LayerVersion(
+            self,
+            project_name + "-" + function_name + "-dependencies",
+            code=lambda_.Code.from_asset(output_dir),
+        )
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -58,6 +82,46 @@ class InsulinCalcStack(Stack):
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             table_name=table_name,
+            time_to_live_attribute="TTL",
+            resource_policy=PolicyDocument(
+                statements=[
+                    iam.PolicyStatement(
+                        actions=[
+                            "dynamodb:DescribeTable",
+                            "dynamodb:GetItem",
+                            "dynamodb:PutItem",
+                            "dynamodb:DeleteItem",
+                            "dynamodb:UpdateItem",
+                            "dynamodb:Query",
+                            "dynamodb:Scan",
+                        ],
+                        resources=[
+                            f"arn:aws:dynamodb:{self._region}:{self._accountId}:table/{table_name}"
+                        ],
+                        principals=[iam.AccountRootPrincipal()],
+                        conditions={
+                            "StringEquals": {
+                                "aws:PrincipalArn": f"arn:aws:iam::{self._accountId}:root"
+                            }
+                        },
+                    )
+                ]
+            ),
+        )
+
+        table_name2 = "CGM"
+        # Dynamo DB
+        table2 = dynamodb.Table(
+            self,
+            "CGM",
+            partition_key=dynamodb.Attribute(
+                name="DeviceId", type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="Date", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            table_name=table_name2,
             time_to_live_attribute="TTL",
             resource_policy=PolicyDocument(
                 statements=[
@@ -213,6 +277,47 @@ class InsulinCalcStack(Stack):
             )
         )
 
+        CGMLambdaExecutionRole = iam.Role(
+            self,
+            "CGMLambdaExecutionRole",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            role_name="CGMLambdaExecutionRole",
+        )
+
+        CGMLambdaExecutionRole.attach_inline_policy(
+            iam.Policy(
+                self,
+                "CGMHandlerInlinePolicy",
+                statements=[
+                    iam.PolicyStatement(
+                        actions=[
+                            "dynamodb:List*",
+                            "dynamodb:DescribeReservedCapacity*",
+                            "dynamodb:DescribeLimits",
+                            "dynamodb:DescribeTimeToLive",
+                            "dynamodb:Get*",
+                            "dynamodb:PutItem",
+                        ],
+                        resources=[table2.table_arn],
+                    ),
+                    iam.PolicyStatement(
+                        actions=[
+                            "secretsmanager:GetSecretValue",
+                        ],
+                        resources=["*"],
+                    ),
+                    iam.PolicyStatement(
+                        actions=[
+                            "logs:CreateLogGroup",
+                            "logs:CreateLogStream",
+                            "logs:PutLogEvents",
+                        ],
+                        resources=["*"],
+                    ),
+                ],
+            )
+        )
+
         ##########################################################################
         #   Lambda Functions                                                     #
         ##########################################################################
@@ -256,6 +361,30 @@ class InsulinCalcStack(Stack):
             },
             function_name="AuthorizerFunction",
         )
+        # Lambda - AuthorizerFunction
+        cgmLambda = lambda_.Function(
+            self,
+            "CGMLambdaFunction",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="cgm.lambda_handler",
+            architecture=lambda_.Architecture.ARM_64,
+            code=lambda_.Code.from_asset("lambda/cgm/"),
+            timeout=Duration.seconds(16),
+            role=CGMLambdaExecutionRole,
+            function_name="CGMLambdaFunction",
+            layers=[self.create_dependencies_layer_cgm("cgm", "CGMLambdaFunction")],
+        )
+
+        aws_events.Rule(
+            self,
+            f"cgmCron",
+            schedule=aws_events.Schedule.cron(
+                minute="*/5", hour="*", month="*", week_day="*", year="*"
+            ),
+            targets=[aws_events_targets.LambdaFunction(handler=cgmLambda)],
+            rule_name=f"cgmCronRule",
+        )
+
         principal = iam.ServicePrincipal("apigateway.amazonaws.com")
         ApiGwToSqsRole.attach_inline_policy(
             iam.Policy(

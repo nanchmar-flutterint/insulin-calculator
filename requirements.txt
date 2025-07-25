@@ -1,8 +1,7 @@
 aws-cdk-lib
 constructs
-
+pydexcom
 boto3~=1.34.152
 aws-lambda-powertools~=2.43.1
 numpy~=2.0.0
 botocore~=1.34.152
-pydexcom~=0.3.2

@@ -1,5 +1,6 @@
 # Insulin Calculation and Nutrition History API
 
+
 This project implements an AWS-based API for calculating insulin dosage and managing nutrition history for diabetic patients.
 
 The Insulin Calculation and Nutrition History API is a serverless application built using AWS CDK. It provides a secure and scalable solution for calculating insulin dosage based on food intake, blood glucose levels, and other factors. The API also stores nutrition history in a DynamoDB table for future reference and analysis.
@@ -151,3 +152,14 @@ The project uses AWS CDK to define and deploy the following resources:
   - Used for retrieving nutritional information and insulin dosage calculation
 
 ![Architecture](diagram.png)
+
+## List of AWS Services
+
+| AWS Service              | Component/Usage                     | Description                                                                 |
+|--------------------------|-------------------------------------|-----------------------------------------------------------------------------|
+| API Gateway (HTTP API)   | Entry point for HTTP requests       | Routes external HTTP requests to Lambda functions                          |
+| AWS Lambda               | Authorizer, NutritionHandler        | Serverless compute to handle auth and business logic                       |
+| AWS Secrets Manager      | Auth Credentials                    | Securely stores and retrieves credentials used by the Lambda Authorizer    |
+| Amazon DynamoDB          | NutritionHistory                    | NoSQL database to store nutritional data                                   |
+| Amazon Bedrock           | Claude Model                        | Uses Claude LLM for AI-driven language processing                          |
+| Amazon CloudWatch Logs   | API Requests                        | Logs API Gateway and Lambda activity for monitoring and debugging          |
