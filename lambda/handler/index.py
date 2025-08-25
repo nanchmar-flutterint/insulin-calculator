@@ -49,6 +49,25 @@ class Config:
     daily_amplitude: float = 0.08  # 10% variation (middle of 8-12% range)
     dawn_peak_hour: float = 6.0  # Dawn phenomenon peaks around 6 AM
     daily_peak_hour: float = 16.0  # Afternoon insulin resistance peak (4 PM)
+    SYSTEM_PROMPT = """You provide precise nutritional data using USDA FoodData Central or similar reputable sources. 
+    Calculate values for the exact quantity specified, not per 100g.
+    Response Format - JSON only:
+    {
+     "carbohydrates": "X.X",
+     "fats": "Y.Y", 
+     "proteins": "Z.Z",
+     "calories": "W.W",
+     "gi": "M.M"
+    }
+
+    Rules:
+    - All values in grams/calories for specified quantity
+    - Round to one decimal place
+    - GI: 0-100 scale, use closest similar food if unavailable
+    - If food not found: {"error": "Food item not found or insufficient data available"}
+    - Use closest equivalent if exact food unavailable
+
+    Calculation: (base_per_100g × quantity) ÷ 100, rounded to 1 decimal."""
 
     # Additional circadian parameters from research
 
@@ -117,7 +136,8 @@ async def get_nutrient_data(prompt: str) -> Optional[Dict[str, Any]]:
             lambda: bedrock_client.converse(
                 modelId=Config.model_id,
                 messages=[{"role": "user", "content": [{"text": prompt}]}],
-                inferenceConfig={"maxTokens": 2000, "temperature": 0, "topP": 1.0},
+                inferenceConfig={"maxTokens": 300, "temperature": 0, "topP": 0.1},
+                system=[{"text": Config.SYSTEM_PROMPT}],
             ),
         )
         return json.loads(response["output"]["message"]["content"][0]["text"])
