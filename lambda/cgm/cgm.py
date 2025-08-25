@@ -48,7 +48,7 @@ def lambda_handler(event, context):
                 "TrendDirection": str(trend_direction),
                 "TrendDescription": str(trend_description),
                 "TrendArrow": str(trend_arrow),
-                "TTL": int((datetime.now(UTC) + timedelta(days=60)).timestamp()),
+                "TTL": int((datetime.now(UTC) + timedelta(days=30)).timestamp()),
             }
         )
     except ClientError as e:

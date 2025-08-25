@@ -149,7 +149,6 @@ class InsulinCalculator:
 
         # Combined circadian factor (1.0 = normal, >1.0 = more resistant, <1.0 = more sensitive)
         self.circadian_factor = 1.0 + dawn_effect + daily_effect
-        self.circadian_factor = max(0.85, min(1.15, self.circadian_factor))  # cap it
         # Apply circadian adjustment to patient parameters
         self.insulin_carbs_ratio = float(insulin_carbs_ratio) * self.circadian_factor
         self.compensation_factor = float(compensation_factor) * self.circadian_factor
@@ -274,7 +273,7 @@ def calculate_evidence_based_fpu(fats: float, proteins: float) -> Dict[str, Any]
     """
     # Calorie calculation (unchanged - this is accurate)
     fat_calories = fats * 9
-    protein_calories = proteins * 4
+    protein_calories = proteins * 4 * 0.58
     total_calories = fat_calories + protein_calories
     total_fpu = total_calories / 100
 

@@ -381,6 +381,7 @@ class InsulinCalcStack(Stack):
             schedule=aws_events.Schedule.cron(
                 minute="*/5", hour="*", month="*", week_day="*", year="*"
             ),
+            enabled=False,
             targets=[aws_events_targets.LambdaFunction(handler=cgmLambda)],
             rule_name=f"cgmCronRule",
         )
