@@ -34,7 +34,7 @@ class Config:
     table_name: str = os.getenv("DYNAMO_DB_NAME", "NutritionHistory")
     region_name: str = os.getenv("AWS_REGION", "us-east-1")
     model_id: str = os.getenv(
-        "BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20240620-v1:0"
+        "BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-20250514-v1:0"
     )
 
     # Evidence-based Fiasp pharmacokinetics
@@ -64,25 +64,42 @@ class NutrientPrompt:
     """Handles the formatting of prompts to get nutritional information from the AI model.
     Uses a template to ensure consistent formatting of requests."""
 
-    TEMPLATE = """Provide the nutritional information for the given
-    food item and quantity as accurately as
-possible. Base the information on reputable nutritional databases or scientific sources.
-
-Food item: {food_name}
-Quantity: {food_quantity} grams or ml
-
-Return only the JSON output in the following format:
-{{
-  "carbohydrates": "X",
-  "fats": "Y", 
-  "proteins": "Z",
-  "gi": "M"
-}}
-
-Where:
-- X, Y, Z are numbers in grams
-- M is the glycemic index (unitless)
-- All numerical values should be rounded to one decimal place""".strip()
+    TEMPLATE = """
+    Provide the nutritional information for the given food item and quantity as accurately as possible. 
+    Base the information 
+    on reputable nutritional databases such as USDA FoodData Central, 
+    NCCDB (Nutrition Coordinating Center Food & Nutrient Database), or peer-reviewed nutritional research.
+    
+    Food item: {food_name}
+    Quantity: {food_quantity} grams or ml
+    
+    If the exact food item cannot be found, use the closest equivalent food item. 
+    If glycemic index (GI) data is unavailable for the specific food, use the GI value from the closest 
+    similar food item.
+    If the food item cannot be identified at all, return an error message in JSON format.
+    Return only the JSON output in the following format:
+    
+    For successful lookup: 
+    {{ 
+    "carbohydrates": "X",
+    "fats": "Y", 
+    "proteins": "Z", 
+    "calories": "W", 
+    "gi": "M" 
+    }}
+    
+    For errors: 
+    {{ 
+    "error": "Food item not found or insufficient data available" 
+    }}
+    
+    Where:
+    X, Y, Z are numbers in grams per the specified quantity
+    W is calories per the specified quantity
+    M is the glycemic index (unitless, 0-100 scale)
+    All numerical values should be rounded to one decimal place
+    Values should be calculated for exactly {food_quantity} grams/ml of {food_name}, not per 100g
+    """.strip()
 
     @staticmethod
     @lru_cache(maxsize=1000)

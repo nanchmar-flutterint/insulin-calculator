@@ -22,7 +22,7 @@ import os
 
 
 class InsulinCalcStack(Stack):
-    MODEL = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+    MODEL = "us.anthropic.claude-sonnet-4-20250514-v1:0"
 
     def create_dependencies_layer_cgm(
         self, project_name, function_name: str
