@@ -524,7 +524,7 @@ def lambda_handler(event: Dict[str, Any], _) -> Dict[str, Any]:
             {
                 "DeviceId": payload["DeviceId"],
                 "Date": payload["Date"],
-                "TTL": int((datetime.now(UTC) + timedelta(days=365)).timestamp()),
+                "TTL": int((datetime.now(UTC) + timedelta(days=14)).timestamp()),
                 "CircadianFactor": str(insulin_calc.circadian_factor),
                 "Version": "2.0-EvidenceBased",  # Version tracking
             }
