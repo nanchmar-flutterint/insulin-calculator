@@ -321,19 +321,19 @@ def lambda_handler(event: Dict[str, Any], _) -> Dict[str, Any]:
         create_one_time_schedule(
             "CGMLambdaFunction",
             0,
-            f"{device_id}-{safe_date}-30",
+            f"{device_id}-{safe_date}-30m",
             delay_minutes=30,
         )
         create_one_time_schedule(
             "CGMLambdaFunction",
             0,
-            f"{device_id}-{safe_date}-15",
+            f"{device_id}-{safe_date}-15m",
             delay_minutes=15,
         )
         create_one_time_schedule(
             "CGMLambdaFunction",
             0,
-            f"{device_id}-{safe_date}-2",
+            f"{device_id}-{safe_date}-2m",
             delay_minutes=2,
         )
         return {"statusCode": 200, "body": json.dumps(table_entry)}
