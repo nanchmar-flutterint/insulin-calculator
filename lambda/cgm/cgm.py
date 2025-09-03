@@ -2,9 +2,7 @@
 # If you need more information about configurations
 # or implementing the sample code, visit the AWS docs:
 # https://aws.amazon.com/developer/language/python/
-from datetime import datetime
-from datetime import UTC, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import UTC, datetime, timedelta, timezone
 import boto3
 from botocore.exceptions import ClientError
 import json
@@ -20,13 +18,13 @@ CLIENT = SESSION.client(service_name="secretsmanager", region_name=REGION_NAME)
 
 def lambda_handler(event, context):
     # Create a Secrets Manager client
-    sofia_time = datetime.now(ZoneInfo("Europe/Sofia"))
-    formatted_date = sofia_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(event)
+    current_time = datetime.now(timezone.utc)
+    formatted_date = current_time.strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         get_secret_value_response = json.loads(
             CLIENT.get_secret_value(SecretId=SECRET_NAME)["SecretString"]
         )
-
         dexcom = Dexcom(
             username=get_secret_value_response["username"],
             password=get_secret_value_response["password"],

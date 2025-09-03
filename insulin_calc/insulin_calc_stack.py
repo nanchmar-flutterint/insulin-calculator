@@ -10,8 +10,6 @@ from aws_cdk import (
     aws_logs as logs,
     CfnOutput as CfnOutput,
     Duration,
-    aws_events,
-    aws_events_targets,
 )
 from aws_cdk.aws_iam import PolicyDocument
 from constructs import Construct
@@ -237,6 +235,21 @@ class InsulinCalcStack(Stack):
                         ],
                         resources=["*"],
                     ),
+                    iam.PolicyStatement(
+                        actions=[
+                            "scheduler:CreateSchedule",
+                            "scheduler:GetSchedule",
+                            "scheduler:UpdateSchedule",
+                            "scheduler:DeleteSchedule",
+                        ],
+                        resources=["*"],
+                    ),
+                    iam.PolicyStatement(
+                        actions=["iam:PassRole"],
+                        resources=[
+                            f"arn:aws:iam::{self._accountId}:role/EventBridgeSchedulerRole"
+                        ],
+                    ),
                 ],
             )
         )
@@ -373,17 +386,6 @@ class InsulinCalcStack(Stack):
             layers=[self.create_dependencies_layer_cgm("cgm", "CGMLambdaFunction")],
         )
 
-        aws_events.Rule(
-            self,
-            f"cgmCron",
-            schedule=aws_events.Schedule.cron(
-                minute="*/5", hour="*", month="*", week_day="*", year="*"
-            ),
-            enabled=False,
-            targets=[aws_events_targets.LambdaFunction(handler=cgmLambda)],
-            rule_name=f"cgmCronRule",
-        )
-
         principal = iam.ServicePrincipal("apigateway.amazonaws.com")
         ApiGwToSqsRole.attach_inline_policy(
             iam.Policy(
@@ -501,4 +503,26 @@ class InsulinCalcStack(Stack):
             "HttpApiEndpoint",
             description="API Endpoint",
             value=Apigwv2.attr_api_endpoint,
+        )
+        # Lambda SQS Handler to Dynamo DB Role
+        EventbridgeSchedulerRole = iam.Role(
+            self,
+            "EventBridgeSchedulerRole",
+            assumed_by=iam.ServicePrincipal("scheduler.amazonaws.com"),
+            role_name="EventBridgeSchedulerRole",
+        )
+
+        EventbridgeSchedulerRole.attach_inline_policy(
+            iam.Policy(
+                self,
+                "EventBridgeSchedulerRolePolicy",
+                statements=[
+                    iam.PolicyStatement(
+                        actions=[
+                            "lambda:InvokeFunction",
+                        ],
+                        resources=[cgmLambda.function_arn],
+                    ),
+                ],
+            ),
         )

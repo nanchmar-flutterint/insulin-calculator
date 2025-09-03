@@ -4,7 +4,7 @@ import math
 import os
 import warnings
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
@@ -311,6 +311,25 @@ def lambda_handler(event: Dict[str, Any], _) -> Dict[str, Any]:
             }
         )
         dynamodb.put_item(Item=table_entry)
+        device_id = payload["DeviceId"]
+        dt = datetime.fromisoformat(payload["Date"].replace("Z", "+00:00"))
+        safe_date = dt.strftime("%Y%m%dT%H%M%SZ")
+
+        create_one_time_schedule("CGMLambdaFunction", 1, f"{device_id}-{safe_date}-1")
+        create_one_time_schedule("CGMLambdaFunction", 2, f"{device_id}-{safe_date}-2")
+        create_one_time_schedule("CGMLambdaFunction", 3, f"{device_id}-{safe_date}-3")
+        create_one_time_schedule(
+            "CGMLambdaFunction",
+            0,
+            f"{device_id}-{safe_date}-30",
+            delay_minutes=30,
+        )
+        create_one_time_schedule(
+            "CGMLambdaFunction",
+            0,
+            f"{device_id}-{safe_date}-15",
+            delay_minutes=15,
+        )
         return {"statusCode": 200, "body": json.dumps(table_entry)}
 
     except Exception as e:
@@ -319,3 +338,27 @@ def lambda_handler(event: Dict[str, Any], _) -> Dict[str, Any]:
             "statusCode": 500,
             "body": json.dumps({"error": "Internal server error"}),
         }
+
+
+def create_one_time_schedule(function_name, delay_hours, rule_name, delay_minutes=0):
+    scheduler = boto3.client("scheduler")
+    region = os.environ["AWS_REGION"]
+    sts = boto3.client("sts")
+    account_id = sts.get_caller_identity()["Account"]
+
+    target_time = datetime.now(timezone.utc) + timedelta(
+        hours=delay_hours, minutes=delay_minutes
+    )
+
+    response = scheduler.create_schedule(
+        Name=rule_name,
+        ScheduleExpression=f"at({target_time.strftime('%Y-%m-%dT%H:%M:%S')})",
+        FlexibleTimeWindow={"Mode": "OFF"},
+        Target={
+            "Arn": f"arn:aws:lambda:{region}:{account_id}:function:{function_name}",
+            "RoleArn": f"arn:aws:iam::{account_id}:role/EventBridgeSchedulerRole",
+        },
+        RetryPolicy={"MaximumRetryAttempts": 5, "MaximumEventAgeInSeconds": 180},
+    )
+
+    return response
