@@ -10,19 +10,17 @@ from aws_cdk import (
     aws_logs as logs,
     CfnOutput as CfnOutput,
     Duration,
-    BundlingOptions,
     aws_events,
     aws_events_targets,
 )
 from aws_cdk.aws_iam import PolicyDocument
-from aws_cdk.aws_scheduler import Schedule, ScheduleExpression
 from constructs import Construct
 import json
 import os
 
 
 class InsulinCalcStack(Stack):
-    MODEL = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    MODEL = "anthropic.claude-3-5-sonnet-20240620-v1:0"
 
     def create_dependencies_layer_cgm(
         self, project_name, function_name: str
