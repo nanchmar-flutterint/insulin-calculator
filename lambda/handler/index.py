@@ -330,6 +330,12 @@ def lambda_handler(event: Dict[str, Any], _) -> Dict[str, Any]:
             f"{device_id}-{safe_date}-15",
             delay_minutes=15,
         )
+        create_one_time_schedule(
+            "CGMLambdaFunction",
+            0,
+            f"{device_id}-{safe_date}-2",
+            delay_minutes=2,
+        )
         return {"statusCode": 200, "body": json.dumps(table_entry)}
 
     except Exception as e:
@@ -357,8 +363,8 @@ def create_one_time_schedule(function_name, delay_hours, rule_name, delay_minute
         Target={
             "Arn": f"arn:aws:lambda:{region}:{account_id}:function:{function_name}",
             "RoleArn": f"arn:aws:iam::{account_id}:role/EventBridgeSchedulerRole",
+            "RetryPolicy": {"MaximumRetryAttempts": 5, "MaximumEventAgeInSeconds": 180},
         },
-        RetryPolicy={"MaximumRetryAttempts": 5, "MaximumEventAgeInSeconds": 180},
     )
 
     return response
